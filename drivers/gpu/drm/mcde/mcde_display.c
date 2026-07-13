@@ -158,9 +158,9 @@ void mcde_display_disable_irqs(struct mcde *mcde)
 }
 
 static int mcde_plane_helper_atomic_check(struct drm_plane *plane,
-					  struct drm_atomic_commit *state)
+					  struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *pstate = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *pstate = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = pstate->crtc;
 	struct drm_crtc_state *cstate;
 	const struct drm_display_mode *mode;
@@ -171,7 +171,7 @@ static int mcde_plane_helper_atomic_check(struct drm_plane *plane,
 	if (!crtc)
 		return 0;
 
-	cstate = drm_atomic_get_new_crtc_state(state, crtc);
+	cstate = drm_atomic_get_new_crtc_state(commit, crtc);
 	if (!cstate)
 		return 0;
 
@@ -1172,7 +1172,7 @@ static void mcde_setup_dsi(struct mcde *mcde, const struct drm_display_mode *mod
 }
 
 static void mcde_crtc_helper_atomic_enable(struct drm_crtc *crtc,
-					   struct drm_atomic_commit *state)
+					   struct drm_atomic_commit *commit)
 {
 	struct drm_device *drm = crtc->dev;
 	struct mcde *mcde = to_mcde(drm);
@@ -1319,7 +1319,7 @@ static void mcde_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void mcde_crtc_helper_atomic_disable(struct drm_crtc *crtc,
-					    struct drm_atomic_commit *state)
+					    struct drm_atomic_commit *commit)
 {
 	struct drm_device *drm = crtc->dev;
 	struct mcde *mcde = to_mcde(drm);
@@ -1402,7 +1402,7 @@ static void mcde_set_extsrc(struct mcde *mcde, u32 buffer_address)
 }
 
 static void mcde_plane_helper_atomic_update(struct drm_plane *plane,
-					    struct drm_atomic_commit *state)
+					    struct drm_atomic_commit *commit)
 {
 	struct drm_crtc *crtc = plane->state->crtc;
 	struct drm_device *drm;
@@ -1498,20 +1498,18 @@ static void mcde_crtc_disable_vblank(struct drm_crtc *crtc)
 	writel(0xFFFFFFFF, mcde->regs + MCDE_RISPP);
 }
 
-static int mcde_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *state)
+static int mcde_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 	int ret;
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+		if (ret)
+			return ret;
+	}
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
-
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+	return drm_atomic_add_affected_planes(commit, crtc);
 }
 
 static const struct drm_crtc_funcs mcde_crtc_funcs = {
