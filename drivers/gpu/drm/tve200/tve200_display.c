@@ -72,18 +72,18 @@ irqreturn_t tve200_irq(int irq, void *data)
 }
 
 static int tve200_plane_helper_atomic_check(struct drm_plane *plane,
-					    struct drm_atomic_commit *state)
+					    struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *pstate = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *pstate = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = pstate->crtc;
 	struct drm_crtc_state *cstate = NULL;
 	const struct drm_display_mode *mode;
-	struct drm_framebuffer *old_fb = plane->state->fb;
+	struct drm_framebuffer *old_fb = drm_atomic_get_old_plane_state(commit, plane)->fb;
 	struct drm_framebuffer *fb = pstate->fb;
 	int ret;
 
 	if (crtc)
-		cstate = drm_atomic_get_new_crtc_state(state, crtc);
+		cstate = drm_atomic_get_new_crtc_state(commit, crtc);
 
 	ret = drm_atomic_helper_check_plane_state(pstate, cstate,
 						  DRM_PLANE_NO_SCALING,
@@ -143,21 +143,11 @@ static int tve200_plane_helper_atomic_check(struct drm_plane *plane,
 }
 
 static void tve200_plane_helper_atomic_update(struct drm_plane *plane,
-					      struct drm_atomic_commit *state)
+					      struct drm_atomic_commit *commit)
 {
-	struct drm_crtc *crtc = plane->state->crtc;
-	struct drm_device *drm;
-	struct tve200_drm_dev_private *priv;
-	struct drm_pending_vblank_event *event;
+	struct tve200_drm_dev_private *priv = plane->dev->dev_private;
 	struct drm_plane_state *pstate = plane->state;
 	struct drm_framebuffer *fb = pstate->fb;
-
-	if (!crtc)
-		return;
-
-	drm = crtc->dev;
-	priv = drm->dev_private;
-	event = crtc->state->event;
 
 	if (fb) {
 		/* For RGB, the Y component is used as base address */
@@ -172,6 +162,12 @@ static void tve200_plane_helper_atomic_update(struct drm_plane *plane,
 			       priv->regs + TVE200_V_FRAME_BASE_ADDR);
 		}
 	}
+}
+
+static void tve200_crtc_helper_atomic_flush(struct drm_crtc *crtc,
+					    struct drm_atomic_commit *commit)
+{
+	struct drm_pending_vblank_event *event = crtc->state->event;
 
 	if (event) {
 		crtc->state->event = NULL;
@@ -201,11 +197,11 @@ static const struct drm_plane_funcs tve200_plane_funcs = {
 };
 
 static void tve200_crtc_helper_atomic_enable(struct drm_crtc *crtc,
-					     struct drm_atomic_commit *state)
+					     struct drm_atomic_commit *commit)
 {
 	struct drm_device *drm = crtc->dev;
 	struct tve200_drm_dev_private *priv = drm->dev_private;
-	struct drm_crtc_state *cstate = drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_crtc_state *cstate = drm_atomic_get_new_crtc_state(commit, crtc);
 	const struct drm_display_mode *mode = &cstate->mode;
 	struct drm_plane_state *plane_state = priv->plane.state;
 	struct drm_framebuffer *fb = plane_state->fb;
@@ -321,7 +317,7 @@ static void tve200_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void tve200_crtc_helper_atomic_disable(struct drm_crtc *crtc,
-					      struct drm_atomic_commit *state)
+					      struct drm_atomic_commit *commit)
 {
 	struct drm_device *drm = crtc->dev;
 	struct tve200_drm_dev_private *priv = drm->dev_private;
@@ -354,26 +350,24 @@ static void tve200_crtc_disable_vblank(struct drm_crtc *crtc)
 	writel(0, priv->regs + TVE200_INT_EN);
 }
 
-static int tve200_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *state)
+static int tve200_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
-	int ret;
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		int ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+		if (ret)
+			return ret;
+	}
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
-
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+	return drm_atomic_add_affected_planes(commit, crtc);
 }
 
 static const struct drm_crtc_helper_funcs tve200_crtc_helper_funcs = {
 	.atomic_check	= tve200_crtc_helper_atomic_check,
 	.atomic_enable	= tve200_crtc_helper_atomic_enable,
 	.atomic_disable	= tve200_crtc_helper_atomic_disable,
+	.atomic_flush	= tve200_crtc_helper_atomic_flush,
 };
 
 static const struct drm_crtc_funcs tve200_crtc_funcs = {

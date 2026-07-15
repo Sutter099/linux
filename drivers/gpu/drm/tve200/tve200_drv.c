@@ -106,18 +106,17 @@ static int tve200_modeset_init(struct drm_device *dev)
 	}
 
 	priv->panel = panel;
-	priv->connector = drm_panel_bridge_connector(bridge);
 	priv->bridge = bridge;
-
-	ret = drm_connector_attach_encoder(priv->connector, &priv->encoder);
-	if (ret) {
-		dev_err(dev->dev, "failed to attach encoder\n");
-		goto out_bridge;
-	}
 
 	ret = drm_bridge_attach(&priv->encoder, bridge, NULL, 0);
 	if (ret) {
 		dev_err(dev->dev, "failed to attach bridge\n");
+		goto out_bridge;
+	}
+
+	priv->connector = drm_panel_bridge_connector(bridge);
+	if (!priv->connector) {
+		ret = -ENODEV;
 		goto out_bridge;
 	}
 
