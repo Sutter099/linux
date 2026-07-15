@@ -141,9 +141,9 @@ static void imx_lcdc_update_hw_registers(struct drm_crtc *crtc,
 					 struct drm_plane_state *old_state,
 					 bool mode_set)
 {
-	struct drm_plane_state *new_state = crtc->primary->state;
-	struct drm_framebuffer *fb = new_state->fb;
 	struct imx_lcdc *lcdc = imx_lcdc_from_drmdev(crtc->dev);
+	struct drm_plane_state *new_state = lcdc->plane.state;
+	struct drm_framebuffer *fb = new_state->fb;
 	u32 lpcr, lvcr, lhcr;
 	u32 framesize;
 	dma_addr_t addr;
