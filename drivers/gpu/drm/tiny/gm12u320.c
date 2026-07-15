@@ -626,10 +626,10 @@ static int gm12u320_crtc_helper_atomic_check(struct drm_crtc *crtc,
 					     struct drm_atomic_commit *commit)
 {
 	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
+	int ret;
 
 	if (crtc_state->enable) {
-		int ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-
+		ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
 		if (ret)
 			return ret;
 	}

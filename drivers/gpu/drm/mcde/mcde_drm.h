@@ -97,10 +97,7 @@ struct mcde {
 	struct regulator *vana;
 };
 
-static struct mcde *to_mcde(struct drm_device *dev)
-{
-	return container_of(dev, struct mcde, drm);
-}
+struct mcde *to_mcde(struct drm_device *dev);
 
 static inline bool mcde_flow_is_video(struct mcde *mcde)
 {

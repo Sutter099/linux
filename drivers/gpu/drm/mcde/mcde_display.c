@@ -164,7 +164,7 @@ static int mcde_plane_helper_atomic_check(struct drm_plane *plane,
 	struct drm_crtc *crtc = pstate->crtc;
 	struct drm_crtc_state *cstate = NULL;
 	const struct drm_display_mode *mode;
-	struct drm_framebuffer *old_fb = plane->state->fb;
+	struct drm_framebuffer *old_fb = drm_atomic_get_old_plane_state(commit, plane)->fb;
 	struct drm_framebuffer *fb = pstate->fb;
 	int ret;
 
@@ -1172,9 +1172,10 @@ static void mcde_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 {
 	struct drm_device *drm = crtc->dev;
 	struct mcde *mcde = to_mcde(drm);
-	struct drm_crtc_state *cstate = crtc->state;
+	struct drm_crtc_state *cstate = drm_atomic_get_new_crtc_state(commit, crtc);
 	const struct drm_display_mode *mode = &cstate->mode;
-	struct drm_framebuffer *fb = mcde->plane.state->fb;
+	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(commit, &mcde->plane);
+	struct drm_framebuffer *fb = plane_state->fb;
 	u32 format = fb->format->format;
 	int dsi_pkt_size;
 	int fifo_wtrmrk;
