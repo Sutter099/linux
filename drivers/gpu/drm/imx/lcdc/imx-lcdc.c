@@ -190,15 +190,15 @@ static void imx_lcdc_update_hw_registers(struct drm_crtc *crtc,
 }
 
 static void imx_lcdc_crtc_helper_atomic_enable(struct drm_crtc *crtc,
-					       struct drm_atomic_commit *state)
+					       struct drm_atomic_commit *commit)
 {
 	int ret;
 	int clk_div;
 	int bpp;
 	struct imx_lcdc *lcdc = imx_lcdc_from_drmdev(crtc->dev);
-	struct drm_display_mode *mode = &crtc->mode;
+	struct drm_display_mode *mode = &crtc->state->mode;
 	struct drm_display_info *disp_info = &lcdc->connector->display_info;
-	struct drm_plane_state *plane_state = crtc->primary->state;
+	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(commit, &lcdc->plane);
 	const int hsync_pol = (mode->flags & DRM_MODE_FLAG_PHSYNC) ? 0 : 1;
 	const int vsync_pol = (mode->flags & DRM_MODE_FLAG_PVSYNC) ? 0 : 1;
 	const int data_enable_pol =
@@ -248,18 +248,23 @@ static void imx_lcdc_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 
 	/* Enable VBLANK Interrupt */
 	writel(INTR_EOF, lcdc->base + IMX21LCDC_LIER);
+
+	drm_crtc_vblank_on(crtc);
 }
 
 static void imx_lcdc_crtc_helper_atomic_disable(struct drm_crtc *crtc,
-						struct drm_atomic_commit *state)
+						struct drm_atomic_commit *commit)
 {
+	struct drm_crtc_state *old_crtc_state = drm_atomic_get_old_crtc_state(commit, crtc);
 	struct imx_lcdc *lcdc = imx_lcdc_from_drmdev(crtc->dev);
 	struct drm_pending_vblank_event *event;
+
+	drm_crtc_vblank_off(crtc);
 
 	clk_disable_unprepare(lcdc->clk_ahb);
 	clk_disable_unprepare(lcdc->clk_ipg);
 
-	if (crtc->enabled)
+	if (old_crtc_state->enable)
 		clk_disable_unprepare(lcdc->clk_per);
 
 	spin_lock_irq(&lcdc->drm.event_lock);
@@ -275,16 +280,18 @@ static void imx_lcdc_crtc_helper_atomic_disable(struct drm_crtc *crtc,
 }
 
 static int imx_lcdc_crtc_helper_atomic_check(struct drm_crtc *crtc,
-					     struct drm_atomic_commit *state)
+					     struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
+	struct drm_crtc_state *old_crtc_state = drm_atomic_get_old_crtc_state(commit, crtc);
 	const struct drm_display_mode *mode = &crtc_state->mode;
-	const struct drm_display_mode *old_mode = &crtc->state->mode;
+	const struct drm_display_mode *old_mode = &old_crtc_state->mode;
 	int ret;
 
-	if (mode->hdisplay < LCDC_MIN_XRES || mode->hdisplay > LCDC_MAX_XRES ||
-	    mode->vdisplay < LCDC_MIN_YRES || mode->vdisplay > LCDC_MAX_YRES ||
-	    mode->hdisplay % 0x10) { /* must be multiple of 16 */
+	if (crtc_state->enable &&
+	    (mode->hdisplay < LCDC_MIN_XRES || mode->hdisplay > LCDC_MAX_XRES ||
+	     mode->vdisplay < LCDC_MIN_YRES || mode->vdisplay > LCDC_MAX_YRES ||
+	     mode->hdisplay % 0x10)) { /* must be multiple of 16 */
 		drm_err(crtc->dev, "unsupported display mode (%u x %u)\n",
 			mode->hdisplay, mode->vdisplay);
 		return -EINVAL;
@@ -294,24 +301,21 @@ static int imx_lcdc_crtc_helper_atomic_check(struct drm_crtc *crtc,
 		old_mode->hdisplay != mode->hdisplay ||
 		old_mode->vdisplay != mode->vdisplay;
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+		if (ret)
+			return ret;
+	}
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
-
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+	return drm_atomic_add_affected_planes(commit, crtc);
 }
 
 static void imx_lcdc_plane_helper_atomic_update(struct drm_plane *plane,
-						struct drm_atomic_commit *state)
+						struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *old_state = drm_atomic_get_old_plane_state(state, plane);
-	struct drm_plane_state *new_state = plane->state;
+	struct drm_plane_state *old_state = drm_atomic_get_old_plane_state(commit, plane);
+	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = new_state->crtc ?: old_state->crtc;
-	struct drm_pending_vblank_event *event;
 	struct drm_framebuffer *fb = new_state->fb;
 	struct drm_framebuffer *old_fb = old_state->fb;
 	struct drm_crtc *old_crtc = old_state->crtc;
@@ -328,38 +332,22 @@ static void imx_lcdc_plane_helper_atomic_update(struct drm_plane *plane,
 
 		imx_lcdc_update_hw_registers(crtc, old_state, mode_changed);
 	}
-
-	event = crtc->state->event;
-	if (event) {
-		crtc->state->event = NULL;
-
-		spin_lock_irq(&crtc->dev->event_lock);
-
-		if (crtc->state->active && drm_crtc_vblank_get(crtc) == 0)
-			drm_crtc_arm_vblank_event(crtc, event);
-		else
-			drm_crtc_send_vblank_event(crtc, event);
-
-		spin_unlock_irq(&crtc->dev->event_lock);
-	}
 }
 
 static int imx_lcdc_plane_helper_atomic_check(struct drm_plane *plane,
-					      struct drm_atomic_commit *state)
+					      struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state = NULL;
-	int ret;
 
 	if (crtc)
-		crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+		crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 
-	ret = drm_atomic_helper_check_plane_state(plane_state, crtc_state,
+	return drm_atomic_helper_check_plane_state(plane_state, crtc_state,
 						  DRM_PLANE_NO_SCALING,
 						  DRM_PLANE_NO_SCALING,
 						  false, false);
-	return ret;
 }
 
 static const struct drm_plane_helper_funcs imx_lcdc_plane_helper_funcs = {
@@ -377,11 +365,38 @@ static const struct drm_plane_funcs imx_lcdc_plane_funcs = {
 	.atomic_destroy_state	= drm_atomic_helper_plane_destroy_state,
 };
 
+static void imx_lcdc_crtc_helper_atomic_flush(struct drm_crtc *crtc,
+					      struct drm_atomic_commit *commit)
+{
+	struct drm_pending_vblank_event *event = crtc->state->event;
+
+	if (event) {
+		crtc->state->event = NULL;
+
+		spin_lock_irq(&crtc->dev->event_lock);
+		if (crtc->state->active && drm_crtc_vblank_get(crtc) == 0)
+			drm_crtc_arm_vblank_event(crtc, event);
+		else
+			drm_crtc_send_vblank_event(crtc, event);
+		spin_unlock_irq(&crtc->dev->event_lock);
+	}
+}
+
 static const struct drm_crtc_helper_funcs imx_lcdc_crtc_helper_funcs = {
 	.atomic_check	= imx_lcdc_crtc_helper_atomic_check,
 	.atomic_enable	= imx_lcdc_crtc_helper_atomic_enable,
 	.atomic_disable	= imx_lcdc_crtc_helper_atomic_disable,
+	.atomic_flush	= imx_lcdc_crtc_helper_atomic_flush,
 };
+
+static int imx_lcdc_crtc_enable_vblank(struct drm_crtc *crtc)
+{
+	return 0;
+}
+
+static void imx_lcdc_crtc_disable_vblank(struct drm_crtc *crtc)
+{
+}
 
 static const struct drm_crtc_funcs imx_lcdc_crtc_funcs = {
 	.reset			= drm_atomic_helper_crtc_reset,
@@ -390,6 +405,8 @@ static const struct drm_crtc_funcs imx_lcdc_crtc_funcs = {
 	.page_flip		= drm_atomic_helper_page_flip,
 	.atomic_duplicate_state	= drm_atomic_helper_crtc_duplicate_state,
 	.atomic_destroy_state	= drm_atomic_helper_crtc_destroy_state,
+	.enable_vblank		= imx_lcdc_crtc_enable_vblank,
+	.disable_vblank		= imx_lcdc_crtc_disable_vblank,
 };
 
 static const struct drm_encoder_funcs imx_lcdc_encoder_funcs = {
