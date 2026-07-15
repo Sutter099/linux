@@ -104,7 +104,10 @@ struct gm12u320_device {
 	} fb_update;
 };
 
-#define to_gm12u320(__dev) container_of(__dev, struct gm12u320_device, dev)
+static struct gm12u320_device *to_gm12u320(struct drm_device *__dev)
+{
+	return container_of(__dev, struct gm12u320_device, dev);
+}
 
 static const char cmd_data[CMD_SIZE] = {
 	0x55, 0x53, 0x42, 0x43, 0x00, 0x00, 0x00, 0x00,
@@ -563,7 +566,7 @@ static void gm12u320_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 {
 	struct drm_rect rect = { 0, 0, GM12U320_USER_WIDTH, GM12U320_HEIGHT };
 	struct gm12u320_device *gm12u320 = to_gm12u320(crtc->dev);
-	struct drm_plane_state *plane_state = crtc->primary->state;
+	struct drm_plane_state *plane_state = gm12u320->plane.state;
 	struct drm_shadow_plane_state *shadow_plane_state = to_drm_shadow_plane_state(plane_state);
 
 	gm12u320->fb_update.draw_status_timeout = FIRST_FRAME_TIMEOUT;
@@ -598,21 +601,19 @@ static const struct drm_plane_funcs gm12u320_plane_funcs = {
 };
 
 static int gm12u320_plane_helper_atomic_check(struct drm_plane *plane,
-					      struct drm_atomic_commit *state)
+					      struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state = NULL;
-	int ret;
 
 	if (crtc)
-		crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+		crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 
-	ret = drm_atomic_helper_check_plane_state(plane_state, crtc_state,
+	return drm_atomic_helper_check_plane_state(plane_state, crtc_state,
 						  DRM_PLANE_NO_SCALING,
 						  DRM_PLANE_NO_SCALING,
 						  false, false);
-	return ret;
 }
 
 static const struct drm_plane_helper_funcs gm12u320_plane_helper_funcs = {
@@ -622,20 +623,18 @@ static const struct drm_plane_helper_funcs gm12u320_plane_helper_funcs = {
 };
 
 static int gm12u320_crtc_helper_atomic_check(struct drm_crtc *crtc,
-					     struct drm_atomic_commit *state)
+					     struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
-	int ret;
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		int ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
+		if (ret)
+			return ret;
+	}
 
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+	return drm_atomic_add_affected_planes(commit, crtc);
 }
 
 static const struct drm_crtc_helper_funcs gm12u320_crtc_helper_funcs = {
