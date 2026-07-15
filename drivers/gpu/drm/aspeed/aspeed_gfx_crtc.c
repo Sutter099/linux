@@ -135,9 +135,9 @@ static void aspeed_gfx_crtc_mode_set_nofb(struct aspeed_gfx *priv)
 }
 
 static void aspeed_gfx_crtc_helper_atomic_enable(struct drm_crtc *crtc,
-						 struct drm_atomic_commit *state)
+						 struct drm_atomic_commit *commit)
 {
-	struct aspeed_gfx *priv = container_of(crtc, struct aspeed_gfx, crtc);
+	struct aspeed_gfx *priv = to_aspeed_gfx(crtc->dev);
 
 	aspeed_gfx_crtc_mode_set_nofb(priv);
 	aspeed_gfx_enable_controller(priv);
@@ -145,34 +145,21 @@ static void aspeed_gfx_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void aspeed_gfx_crtc_helper_atomic_disable(struct drm_crtc *crtc,
-						  struct drm_atomic_commit *state)
+						  struct drm_atomic_commit *commit)
 {
-	struct aspeed_gfx *priv = container_of(crtc, struct aspeed_gfx, crtc);
+	struct aspeed_gfx *priv = to_aspeed_gfx(crtc->dev);
 
 	drm_crtc_vblank_off(crtc);
 	aspeed_gfx_disable_controller(priv);
 }
 
 static void aspeed_gfx_plane_helper_atomic_update(struct drm_plane *plane,
-						  struct drm_atomic_commit *state)
+						  struct drm_atomic_commit *commit)
 {
-	struct aspeed_gfx *priv = container_of(plane, struct aspeed_gfx, plane);
-	struct drm_crtc *crtc = &priv->crtc;
-	struct drm_framebuffer *fb = plane->state->fb;
-	struct drm_pending_vblank_event *event;
+	struct aspeed_gfx *priv = to_aspeed_gfx(plane->dev);
+	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(commit, plane);
+	struct drm_framebuffer *fb = new_plane_state->fb;
 	struct drm_gem_dma_object *gem;
-
-	spin_lock_irq(&crtc->dev->event_lock);
-	event = crtc->state->event;
-	if (event) {
-		crtc->state->event = NULL;
-
-		if (drm_crtc_vblank_get(crtc) == 0)
-			drm_crtc_arm_vblank_event(crtc, event);
-		else
-			drm_crtc_send_vblank_event(crtc, event);
-	}
-	spin_unlock_irq(&crtc->dev->event_lock);
 
 	if (!fb)
 		return;
@@ -185,7 +172,7 @@ static void aspeed_gfx_plane_helper_atomic_update(struct drm_plane *plane,
 
 static int aspeed_gfx_crtc_enable_vblank(struct drm_crtc *crtc)
 {
-	struct aspeed_gfx *priv = container_of(crtc, struct aspeed_gfx, crtc);
+	struct aspeed_gfx *priv = to_aspeed_gfx(crtc->dev);
 	u32 reg = readl(priv->base + CRT_CTRL1);
 
 	/* Clear pending VBLANK IRQ */
@@ -199,7 +186,7 @@ static int aspeed_gfx_crtc_enable_vblank(struct drm_crtc *crtc)
 
 static void aspeed_gfx_crtc_disable_vblank(struct drm_crtc *crtc)
 {
-	struct aspeed_gfx *priv = container_of(crtc, struct aspeed_gfx, crtc);
+	struct aspeed_gfx *priv = to_aspeed_gfx(crtc->dev);
 	u32 reg = readl(priv->base + CRT_CTRL1);
 
 	reg &= ~CRT_CTRL_VERTICAL_INTR_EN;
@@ -210,21 +197,19 @@ static void aspeed_gfx_crtc_disable_vblank(struct drm_crtc *crtc)
 }
 
 static int aspeed_gfx_plane_helper_atomic_check(struct drm_plane *plane,
-						struct drm_atomic_commit *state)
+						struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state = NULL;
-	int ret;
 
 	if (crtc)
-		crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+		crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 
-	ret = drm_atomic_helper_check_plane_state(plane_state, crtc_state,
+	return drm_atomic_helper_check_plane_state(plane_state, crtc_state,
 						  DRM_PLANE_NO_SCALING,
 						  DRM_PLANE_NO_SCALING,
 						  false, false);
-	return ret;
 }
 
 static const struct drm_plane_helper_funcs aspeed_gfx_plane_helper_funcs = {
@@ -243,26 +228,43 @@ static const struct drm_plane_funcs aspeed_gfx_plane_funcs = {
 };
 
 static int aspeed_gfx_crtc_helper_atomic_check(struct drm_crtc *crtc,
-					       struct drm_atomic_commit *state)
+					       struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 	int ret;
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+		if (ret)
+			return ret;
+	}
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
+	return drm_atomic_add_affected_planes(commit, crtc);
+}
 
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+static void aspeed_gfx_crtc_helper_atomic_flush(struct drm_crtc *crtc,
+						struct drm_atomic_commit *commit)
+{
+	struct drm_crtc_state *new_crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
+	struct drm_pending_vblank_event *event = new_crtc_state->event;
+
+	if (event) {
+		new_crtc_state->event = NULL;
+
+		spin_lock_irq(&crtc->dev->event_lock);
+		if (drm_crtc_vblank_get(crtc) == 0)
+			drm_crtc_arm_vblank_event(crtc, event);
+		else
+			drm_crtc_send_vblank_event(crtc, event);
+		spin_unlock_irq(&crtc->dev->event_lock);
+	}
 }
 
 static const struct drm_crtc_helper_funcs aspeed_gfx_crtc_helper_funcs = {
 	.atomic_check	= aspeed_gfx_crtc_helper_atomic_check,
 	.atomic_enable	= aspeed_gfx_crtc_helper_atomic_enable,
 	.atomic_disable	= aspeed_gfx_crtc_helper_atomic_disable,
+	.atomic_flush	= aspeed_gfx_crtc_helper_atomic_flush,
 };
 
 static const struct drm_crtc_funcs aspeed_gfx_crtc_funcs = {
