@@ -106,7 +106,7 @@ static void send_pending_event(struct xen_drm_front_drm_pipeline *pipeline)
 }
 
 static void xen_drm_crtc_helper_atomic_enable(struct drm_crtc *crtc,
-					      struct drm_atomic_commit *state)
+					      struct drm_atomic_commit *commit)
 {
 	struct xen_drm_front_drm_pipeline *pipeline = to_xen_drm_pipeline(crtc);
 	struct drm_plane_state *plane_state = pipeline->plane.state;
@@ -130,7 +130,7 @@ static void xen_drm_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void xen_drm_crtc_helper_atomic_disable(struct drm_crtc *crtc,
-					       struct drm_atomic_commit *state)
+					       struct drm_atomic_commit *commit)
 {
 	struct xen_drm_front_drm_pipeline *pipeline = to_xen_drm_pipeline(crtc);
 	int ret = 0, idx;
@@ -176,11 +176,11 @@ static void pflip_to_worker(struct work_struct *work)
 }
 
 static bool display_send_page_flip(struct xen_drm_front_drm_pipeline *pipeline,
-				   struct drm_atomic_commit *state,
+				   struct drm_atomic_commit *commit,
 				   struct drm_plane_state *old_plane_state)
 {
 	struct drm_plane_state *plane_state =
-			drm_atomic_get_new_plane_state(state,
+			drm_atomic_get_new_plane_state(commit,
 						       &pipeline->plane);
 
 	/*
@@ -222,15 +222,15 @@ static bool display_send_page_flip(struct xen_drm_front_drm_pipeline *pipeline,
 }
 
 static int xen_drm_plane_helper_atomic_check(struct drm_plane *plane,
-					     struct drm_atomic_commit *state)
+					     struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state = NULL;
 	int ret;
 
 	if (crtc)
-		crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+		crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 
 	ret = drm_atomic_helper_check_plane_state(plane_state, crtc_state,
 						  DRM_PLANE_NO_SCALING,
@@ -260,11 +260,13 @@ static int xen_drm_plane_helper_atomic_check(struct drm_plane *plane,
 }
 
 static void xen_drm_plane_helper_atomic_update(struct drm_plane *plane,
-					       struct drm_atomic_commit *state)
+					       struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *old_plane_state = drm_atomic_get_old_plane_state(state, plane);
-	struct drm_crtc *crtc = plane->state->crtc ?: old_plane_state->crtc;
+	struct drm_plane_state *old_plane_state = drm_atomic_get_old_plane_state(commit, plane);
+	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(commit, plane);
+	struct drm_crtc *crtc = new_plane_state->crtc ?: old_plane_state->crtc;
 	struct xen_drm_front_drm_pipeline *pipeline;
+	struct drm_crtc_state *new_crtc_state;
 	struct drm_pending_vblank_event *event;
 	int idx;
 
@@ -299,7 +301,7 @@ static void xen_drm_plane_helper_atomic_update(struct drm_plane *plane,
 	 * If this is not a page flip, e.g. no flip done event from the backend
 	 * is expected, then send now.
 	 */
-	if (!display_send_page_flip(pipeline, state, old_plane_state))
+	if (!display_send_page_flip(pipeline, commit, old_plane_state))
 		send_pending_event(pipeline);
 
 	drm_dev_exit(idx);
@@ -322,20 +324,18 @@ xen_drm_crtc_helper_mode_valid(struct drm_crtc *crtc,
 	return MODE_OK;
 }
 
-static int xen_drm_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *state)
+static int xen_drm_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 	int ret;
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+		if (ret)
+			return ret;
+	}
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
-
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+	return drm_atomic_add_affected_planes(commit, crtc);
 }
 
 static const struct drm_plane_helper_funcs display_plane_helper_funcs = {
@@ -395,7 +395,7 @@ static int display_pipe_init(struct xen_drm_front_drm_info *drm_info,
 
 	formats = xen_drm_front_conn_get_formats(&format_count);
 
-	ret = drm_universal_plane_init(dev, &pipeline->plane, 1,
+	ret = drm_universal_plane_init(dev, &pipeline->plane, 0,
 				       &display_plane_funcs,
 				       formats, format_count,
 				       NULL,
