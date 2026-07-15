@@ -266,7 +266,6 @@ static void xen_drm_plane_helper_atomic_update(struct drm_plane *plane,
 	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = new_plane_state->crtc ?: old_plane_state->crtc;
 	struct xen_drm_front_drm_pipeline *pipeline;
-	struct drm_crtc_state *new_crtc_state;
 	struct drm_pending_vblank_event *event;
 	int idx;
 
