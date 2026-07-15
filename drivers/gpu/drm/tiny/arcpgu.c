@@ -58,7 +58,10 @@ struct arcpgu_drm_private {
 	struct drm_connector	sim_conn;
 };
 
-#define dev_to_arcpgu(x) container_of(x, struct arcpgu_drm_private, drm)
+static inline struct arcpgu_drm_private *dev_to_arcpgu(struct drm_device *drm)
+{
+	return container_of(drm, struct arcpgu_drm_private, drm);
+}
 
 static inline void arc_pgu_write(struct arcpgu_drm_private *arcpgu,
 				 unsigned int reg, u32 value)
@@ -195,7 +198,7 @@ static void arc_pgu_mode_set(struct arcpgu_drm_private *arcpgu)
 }
 
 static void arcpgu_crtc_helper_atomic_enable(struct drm_crtc *crtc,
-					     struct drm_atomic_commit *state)
+					     struct drm_atomic_commit *commit)
 {
 	struct arcpgu_drm_private *arcpgu = dev_to_arcpgu(crtc->dev);
 
@@ -208,7 +211,7 @@ static void arcpgu_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void arcpgu_crtc_helper_atomic_disable(struct drm_crtc *crtc,
-					      struct drm_atomic_commit *state)
+					      struct drm_atomic_commit *commit)
 {
 	struct arcpgu_drm_private *arcpgu = dev_to_arcpgu(crtc->dev);
 
@@ -219,7 +222,7 @@ static void arcpgu_crtc_helper_atomic_disable(struct drm_crtc *crtc,
 }
 
 static void arcpgu_plane_helper_atomic_update(struct drm_plane *plane,
-					      struct drm_atomic_commit *state)
+					      struct drm_atomic_commit *commit)
 {
 	struct arcpgu_drm_private *arcpgu;
 	struct drm_gem_dma_object *gem;
@@ -241,21 +244,19 @@ static const struct drm_mode_config_funcs arcpgu_drm_modecfg_funcs = {
 DEFINE_DRM_GEM_DMA_FOPS(arcpgu_drm_ops);
 
 static int arcpgu_plane_helper_atomic_check(struct drm_plane *plane,
-					    struct drm_atomic_commit *state)
+					    struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *plane_state = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = plane_state->crtc;
 	struct drm_crtc_state *crtc_state = NULL;
-	int ret;
 
 	if (crtc)
-		crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+		crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 
-	ret = drm_atomic_helper_check_plane_state(plane_state, crtc_state,
+	return drm_atomic_helper_check_plane_state(plane_state, crtc_state,
 						  DRM_PLANE_NO_SCALING,
 						  DRM_PLANE_NO_SCALING,
 						  false, false);
-	return ret;
 }
 
 static const struct drm_plane_helper_funcs arcpgu_plane_helper_funcs = {
@@ -264,13 +265,6 @@ static const struct drm_plane_helper_funcs arcpgu_plane_helper_funcs = {
 	.atomic_update	= arcpgu_plane_helper_atomic_update,
 };
 
-static bool arcpgu_plane_format_mod_supported(struct drm_plane *plane,
-					      u32 format,
-					      u64 modifier)
-{
-	return modifier == DRM_FORMAT_MOD_LINEAR;
-}
-
 static const struct drm_plane_funcs arcpgu_plane_funcs = {
 	.update_plane		= drm_atomic_helper_update_plane,
 	.disable_plane		= drm_atomic_helper_disable_plane,
@@ -278,24 +272,21 @@ static const struct drm_plane_funcs arcpgu_plane_funcs = {
 	.reset			= drm_atomic_helper_plane_reset,
 	.atomic_duplicate_state	= drm_atomic_helper_plane_duplicate_state,
 	.atomic_destroy_state	= drm_atomic_helper_plane_destroy_state,
-	.format_mod_supported	= arcpgu_plane_format_mod_supported,
 };
 
 static int arcpgu_crtc_helper_atomic_check(struct drm_crtc *crtc,
-					   struct drm_atomic_commit *state)
+					   struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 	int ret;
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+		if (ret)
+			return ret;
+	}
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
-
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+	return drm_atomic_add_affected_planes(commit, crtc);
 }
 
 static const struct drm_crtc_helper_funcs arcpgu_crtc_helper_funcs = {
@@ -359,22 +350,6 @@ static int arcpgu_load(struct arcpgu_drm_private *arcpgu)
 	if (dma_set_mask_and_coherent(drm->dev, DMA_BIT_MASK(32)))
 		return -ENODEV;
 
-	/*
-	 * There is only one output port inside each device. It is linked with
-	 * encoder endpoint.
-	 */
-	endpoint_node = of_graph_get_endpoint_by_regs(pdev->dev.of_node, 0, -1);
-	if (endpoint_node) {
-		encoder_node = of_graph_get_remote_port_parent(endpoint_node);
-		of_node_put(endpoint_node);
-	} else {
-		connector = &arcpgu->sim_conn;
-		dev_info(drm->dev, "no encoder found. Assumed virtual LCD on simulation platform\n");
-		ret = arcpgu_drm_sim_init(drm, connector);
-		if (ret < 0)
-			return ret;
-	}
-
 	plane = &arcpgu->plane;
 	ret = drm_universal_plane_init(drm, plane, 0,
 				       &arcpgu_plane_funcs,
@@ -399,13 +374,15 @@ static int arcpgu_load(struct arcpgu_drm_private *arcpgu)
 		return ret;
 	encoder->possible_crtcs = drm_crtc_mask(crtc);
 
-	if (connector) {
-		ret = drm_connector_attach_encoder(connector, encoder);
-		if (ret)
-			return ret;
-	}
+	/*
+	 * There is only one output port inside each device. It is linked with
+	 * encoder endpoint.
+	 */
+	endpoint_node = of_graph_get_endpoint_by_regs(pdev->dev.of_node, 0, -1);
+	if (endpoint_node) {
+		encoder_node = of_graph_get_remote_port_parent(endpoint_node);
+		of_node_put(endpoint_node);
 
-	if (encoder_node) {
 		/* Locate drm bridge from the hdmi encoder DT node */
 		struct drm_bridge *bridge __free(drm_bridge_put) =
 			of_drm_find_and_get_bridge(encoder_node);
@@ -413,6 +390,16 @@ static int arcpgu_load(struct arcpgu_drm_private *arcpgu)
 			return -EPROBE_DEFER;
 
 		ret = drm_bridge_attach(encoder, bridge, NULL, 0);
+		if (ret)
+			return ret;
+	} else {
+		connector = &arcpgu->sim_conn;
+		dev_info(drm->dev, "no encoder found. Assumed virtual LCD on simulation platform\n");
+		ret = arcpgu_drm_sim_init(drm, connector);
+		if (ret < 0)
+			return ret;
+
+		ret = drm_connector_attach_encoder(connector, encoder);
 		if (ret)
 			return ret;
 	}
@@ -439,7 +426,7 @@ static int arcpgu_show_pxlclock(struct seq_file *m, void *arg)
 	struct drm_device *drm = node->minor->dev;
 	struct arcpgu_drm_private *arcpgu = dev_to_arcpgu(drm);
 	unsigned long clkrate = clk_get_rate(arcpgu->clk);
-	unsigned long mode_clock = arcpgu->crtc.mode.crtc_clock * 1000;
+	unsigned long mode_clock = arcpgu->crtc.state->mode.crtc_clock * 1000;
 
 	seq_printf(m, "hw  : %lu\n", clkrate);
 	seq_printf(m, "mode: %lu\n", mode_clock);
