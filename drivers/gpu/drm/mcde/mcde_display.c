@@ -162,18 +162,14 @@ static int mcde_plane_helper_atomic_check(struct drm_plane *plane,
 {
 	struct drm_plane_state *pstate = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = pstate->crtc;
-	struct drm_crtc_state *cstate;
+	struct drm_crtc_state *cstate = NULL;
 	const struct drm_display_mode *mode;
 	struct drm_framebuffer *old_fb = plane->state->fb;
 	struct drm_framebuffer *fb = pstate->fb;
 	int ret;
 
-	if (!crtc)
-		return 0;
-
-	cstate = drm_atomic_get_new_crtc_state(commit, crtc);
-	if (!cstate)
-		return 0;
+	if (crtc)
+		cstate = drm_atomic_get_new_crtc_state(commit, crtc);
 
 	ret = drm_atomic_helper_check_plane_state(pstate, cstate,
 						  DRM_PLANE_NO_SCALING,
@@ -1404,46 +1400,9 @@ static void mcde_set_extsrc(struct mcde *mcde, u32 buffer_address)
 static void mcde_plane_helper_atomic_update(struct drm_plane *plane,
 					    struct drm_atomic_commit *commit)
 {
-	struct drm_crtc *crtc = plane->state->crtc;
-	struct drm_device *drm;
-	struct mcde *mcde;
-	struct drm_pending_vblank_event *event;
+	struct mcde *mcde = to_mcde(plane->dev);
 	struct drm_plane_state *pstate = plane->state;
 	struct drm_framebuffer *fb = pstate->fb;
-
-	if (!crtc)
-		return;
-
-	drm = crtc->dev;
-	mcde = to_mcde(drm);
-	event = crtc->state->event;
-
-	/*
-	 * Handle any pending event first, we need to arm the vblank
-	 * interrupt before sending any update to the display so we don't
-	 * miss the interrupt.
-	 */
-	if (event) {
-		crtc->state->event = NULL;
-
-		spin_lock_irq(&crtc->dev->event_lock);
-		/*
-		 * Hardware must be on before we can arm any vblank event,
-		 * this is not a scanout controller where there is always
-		 * some periodic update going on, it is completely frozen
-		 * until we get an update. If MCDE output isn't yet enabled,
-		 * we just send a vblank dummy event back.
-		 */
-		if (crtc->state->active && drm_crtc_vblank_get(crtc) == 0) {
-			dev_dbg(mcde->dev, "arm vblank event\n");
-			drm_crtc_arm_vblank_event(crtc, event);
-		} else {
-			dev_dbg(mcde->dev, "insert fake vblank event\n");
-			drm_crtc_send_vblank_event(crtc, event);
-		}
-
-		spin_unlock_irq(&crtc->dev->event_lock);
-	}
 
 	/*
 	 * We do not start sending framebuffer updates before the
@@ -1466,6 +1425,37 @@ static void mcde_plane_helper_atomic_update(struct drm_plane *plane,
 		 * do much with that buffer.
 		 */
 		dev_info(mcde->dev, "ignored a display update\n");
+	}
+}
+
+static void mcde_crtc_helper_atomic_flush(struct drm_crtc *crtc,
+					  struct drm_atomic_commit *commit)
+{
+	struct drm_pending_vblank_event *event = crtc->state->event;
+
+	/*
+	 * Handle any pending event first, we need to arm the vblank
+	 * interrupt before sending any update to the display so we don't
+	 * miss the interrupt.
+	 */
+	if (event) {
+		crtc->state->event = NULL;
+
+		spin_lock_irq(&crtc->dev->event_lock);
+		/*
+		 * Hardware must be on before we can arm any vblank event,
+		 * this is not a scanout controller where there is always
+		 * some periodic update going on, it is completely frozen
+		 * until we get an update. If MCDE output isn't yet enabled,
+		 * we just send a vblank dummy event back.
+		 */
+		if (crtc->state->active && drm_crtc_vblank_get(crtc) == 0) {
+			drm_crtc_arm_vblank_event(crtc, event);
+		} else {
+			drm_crtc_send_vblank_event(crtc, event);
+		}
+
+		spin_unlock_irq(&crtc->dev->event_lock);
 	}
 }
 
@@ -1527,6 +1517,7 @@ static const struct drm_crtc_helper_funcs mcde_crtc_helper_funcs = {
 	.atomic_check	= mcde_crtc_helper_atomic_check,
 	.atomic_enable	= mcde_crtc_helper_atomic_enable,
 	.atomic_disable	= mcde_crtc_helper_atomic_disable,
+	.atomic_flush	= mcde_crtc_helper_atomic_flush,
 };
 
 static const struct drm_plane_funcs mcde_plane_funcs = {
@@ -1597,10 +1588,6 @@ int mcde_display_init(struct drm_device *drm)
 		return ret;
 
 	mcde->encoder.possible_crtcs = drm_crtc_mask(&mcde->crtc);
-
-	ret = drm_connector_attach_encoder(mcde->connector, &mcde->encoder);
-	if (ret)
-		return ret;
 
 	return 0;
 }
