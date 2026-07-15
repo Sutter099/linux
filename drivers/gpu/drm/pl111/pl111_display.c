@@ -85,22 +85,18 @@ pl111_crtc_helper_mode_valid(struct drm_crtc *crtc,
 }
 
 static int pl111_plane_helper_atomic_check(struct drm_plane *plane,
-					   struct drm_atomic_commit *state)
+					   struct drm_atomic_commit *commit)
 {
-	struct drm_plane_state *pstate = drm_atomic_get_new_plane_state(state, plane);
+	struct drm_plane_state *pstate = drm_atomic_get_new_plane_state(commit, plane);
 	struct drm_crtc *crtc = pstate->crtc;
-	struct drm_crtc_state *cstate;
+	struct drm_crtc_state *cstate = NULL;
 	const struct drm_display_mode *mode;
-	struct drm_framebuffer *old_fb = plane->state->fb;
+	struct drm_framebuffer *old_fb = drm_atomic_get_old_plane_state(commit, plane)->fb;
 	struct drm_framebuffer *fb = pstate->fb;
 	int ret;
 
-	if (!crtc)
-		return 0;
-
-	cstate = drm_atomic_get_new_crtc_state(state, crtc);
-	if (!cstate)
-		return 0;
+	if (crtc)
+		cstate = drm_atomic_get_new_crtc_state(commit, crtc);
 
 	ret = drm_atomic_helper_check_plane_state(pstate, cstate,
 						  DRM_PLANE_NO_SCALING,
@@ -141,7 +137,7 @@ static int pl111_plane_helper_atomic_check(struct drm_plane *plane,
 }
 
 static void pl111_crtc_helper_atomic_enable(struct drm_crtc *crtc,
-					    struct drm_atomic_commit *state)
+					    struct drm_atomic_commit *commit)
 {
 	struct drm_device *drm = crtc->dev;
 	struct pl111_drm_dev_private *priv = drm->dev_private;
@@ -377,7 +373,7 @@ static void pl111_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void pl111_crtc_helper_atomic_disable(struct drm_crtc *crtc,
-					     struct drm_atomic_commit *state)
+					     struct drm_atomic_commit *commit)
 {
 	struct drm_device *drm = crtc->dev;
 	struct pl111_drm_dev_private *priv = drm->dev_private;
@@ -409,12 +405,11 @@ static void pl111_crtc_helper_atomic_disable(struct drm_crtc *crtc,
 }
 
 static void pl111_plane_helper_atomic_update(struct drm_plane *plane,
-					     struct drm_atomic_commit *state)
+					     struct drm_atomic_commit *commit)
 {
 	struct drm_crtc *crtc = plane->state->crtc;
 	struct drm_device *drm;
 	struct pl111_drm_dev_private *priv;
-	struct drm_pending_vblank_event *event;
 	struct drm_plane_state *pstate = plane->state;
 	struct drm_framebuffer *fb = pstate->fb;
 
@@ -423,13 +418,18 @@ static void pl111_plane_helper_atomic_update(struct drm_plane *plane,
 
 	drm = crtc->dev;
 	priv = drm->dev_private;
-	event = crtc->state->event;
 
 	if (fb) {
 		u32 addr = drm_fb_dma_get_gem_addr(fb, pstate, 0);
 
 		writel(addr, priv->regs + CLCD_UBAS);
 	}
+}
+
+static void pl111_crtc_helper_atomic_flush(struct drm_crtc *crtc,
+					   struct drm_atomic_commit *commit)
+{
+	struct drm_pending_vblank_event *event = crtc->state->event;
 
 	if (event) {
 		crtc->state->event = NULL;
@@ -461,20 +461,18 @@ static void pl111_display_disable_vblank(struct drm_crtc *crtc)
 	writel(0, priv->regs + priv->ienb);
 }
 
-static int pl111_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *state)
+static int pl111_crtc_helper_atomic_check(struct drm_crtc *crtc, struct drm_atomic_commit *commit)
 {
-	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(commit, crtc);
 	int ret;
 
-	if (!crtc_state->enable)
-		goto out;
+	if (crtc_state->enable) {
+		ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
+		if (ret)
+			return ret;
+	}
 
-	ret = drm_atomic_helper_check_crtc_primary_plane(crtc_state);
-	if (ret)
-		return ret;
-
-out:
-	return drm_atomic_add_affected_planes(state, crtc);
+	return drm_atomic_add_affected_planes(commit, crtc);
 }
 
 static struct drm_crtc_funcs pl111_crtc_funcs = {
@@ -491,6 +489,7 @@ static const struct drm_crtc_helper_funcs pl111_crtc_helper_funcs = {
 	.atomic_check	= pl111_crtc_helper_atomic_check,
 	.atomic_enable	= pl111_crtc_helper_atomic_enable,
 	.atomic_disable	= pl111_crtc_helper_atomic_disable,
+	.atomic_flush	= pl111_crtc_helper_atomic_flush,
 };
 
 static const struct drm_plane_funcs pl111_plane_funcs = {
