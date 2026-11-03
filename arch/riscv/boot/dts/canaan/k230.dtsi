@@ -221,6 +221,28 @@
 			};
 		};
 
+		wdt0: watchdog@91106000 {
+			compatible = "snps,dw-wdt";
+			reg = <0x0 0x91106000 0x0 0x800>;
+			interrupts = <107 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sysclk K230_SYSCTL_WDT0_RATE>,
+				 <&sysclk K230_SYSCTL_WDT0_APB_GATE>;
+			clock-names = "tclk", "pclk";
+			resets = <&rst RST_WDT0>;
+			status = "disabled";
+		};
+
+		wdt1: watchdog@91106800 {
+			compatible = "snps,dw-wdt";
+			reg = <0x0 0x91106800 0x0 0x800>;
+			interrupts = <108 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&sysclk K230_SYSCTL_WDT1_RATE>,
+				 <&sysclk K230_SYSCTL_WDT1_APB_GATE>;
+			clock-names = "tclk", "pclk";
+			resets = <&rst RST_WDT1>;
+			status = "disabled";
+		};
+
 		uart0: serial@91400000 {
 			compatible = "snps,dw-apb-uart";
 			reg = <0x0 0x91400000 0x0 0x1000>;
