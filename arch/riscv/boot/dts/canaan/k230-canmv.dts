@@ -11,6 +11,11 @@
 
 	aliases {
 		serial0 = &uart0;
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &i2c2;
+		i2c3 = &i2c3;
+		i2c4 = &i2c4;
 	};
 
 	chosen {
@@ -263,6 +268,62 @@
 		};
 	};
 
+	i2c0_header_pins: i2c0-header-pins {
+		i2c0-header-cfg {
+			pinmux = <K230_PINMUX(60, 2)>,	/* JP1-34 I2C0_SCL */
+				 <K230_PINMUX(61, 2)>;	/* JP1-36 I2C0_SDA */
+			slew-rate = <0>;
+			drive-strength = <7>;
+			power-source = <K230_MSC_3V3>;
+			input-enable;
+			output-enable;
+			bias-pull-up;
+			input-schmitt-enable;
+		};
+	};
+
+	i2c4_header_pins: i2c4-header-pins {
+		i2c4-header-cfg {
+			pinmux = <K230_PINMUX(7, 2)>,	/* JP1-12 I2C4_SCL */
+				 <K230_PINMUX(8, 2)>;	/* JP1-13 I2C4_SDA */
+			slew-rate = <0>;
+			drive-strength = <7>;
+			power-source = <K230_MSC_1V8>;
+			input-enable;
+			output-enable;
+			bias-pull-up;
+			input-schmitt-enable;
+		};
+	};
+
+	i2c1_header_pins: i2c1-header-pins {
+		i2c1-header-cfg {
+			pinmux = <K230_PINMUX(34, 1)>,	/* JP1-32 I2C1_SCL */
+				 <K230_PINMUX(35, 1)>;	/* JP1-33 I2C1_SDA */
+			slew-rate = <0>;
+			drive-strength = <7>;
+			power-source = <K230_MSC_1V8>;
+			input-enable;
+			output-enable;
+			bias-pull-up;
+			input-schmitt-enable;
+		};
+	};
+
+	i2c2_header_pins: i2c2-header-pins {
+		i2c2-header-cfg {
+			pinmux = <K230_PINMUX(11, 3)>,	/* JP1-16 I2C2_SCL */
+				 <K230_PINMUX(12, 3)>;	/* JP1-17 I2C2_SDA */
+			slew-rate = <0>;
+			drive-strength = <7>;
+			power-source = <K230_MSC_1V8>;
+			input-enable;
+			output-enable;
+			bias-pull-up;
+			input-schmitt-enable;
+		};
+	};
+
 	uart3_pins: uart3-pins {
 		uart3-txd-cfg {
 			pinmux = <K230_PINMUX(50, 1)>;
@@ -356,4 +417,36 @@
 
 &wdt1 {
 	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_header_pins>;
+	clock-frequency = <100000>;
+};
+
+&i2c1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_header_pins>;
+	clock-frequency = <100000>;
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_header_pins>;
+	clock-frequency = <100000>;
+};
+
+&i2c3 {
+	status = "okay";
+};
+
+&i2c4 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c4_header_pins>;
+	clock-frequency = <100000>;
 };
