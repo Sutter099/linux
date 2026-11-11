@@ -98,6 +98,8 @@
 		pinctrl: pinctrl@91105000 {
 			compatible = "canaan,k230-pinctrl";
 			reg = <0x0 0x91105000 0x0 0x100>;
+			clocks = <&sysclk K230_SYSCTL_IOMUX_APB_GATE>;
+			clock-names = "apb";
 		};
 
 		sysclk: clock-controller@91102000 {
