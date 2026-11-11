@@ -366,6 +366,8 @@ static int k230_pinconf_set_param(struct pinctrl_dev *pctldev, unsigned int pin,
 		else
 			val &= ~K230_PC_SL;
 		break;
+	case PIN_CONFIG_PERSIST_STATE:
+		return -ENOTSUPP;
 	default:
 		return -EINVAL;
 	}
