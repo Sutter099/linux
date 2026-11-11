@@ -396,7 +396,68 @@
 			input-schmitt-enable;
 		};
 	};
+
+	/*
+	 * JP1 40-pin header GPIOs.
+	 *
+	 * Default configuration: GPIO output with input readback enabled.
+	 * The pad OE/IE bits are static; for input-only use remove
+	 * "output-enable" and keep "input-enable".  For output-only use
+	 * remove "input-enable".
+	 *
+	 * BANK0/BANK1/BANK2 pins are 1.8V only.  BANK4 GPIO60/61 are 3.3V
+	 * and are muxed to I2C0 (JP1-34/36); they are not part of the GPIO
+	 * header state.  JP1-12/13 (IO7/IO8) are I2C4, JP1-16/17
+	 * (IO11/IO12) are I2C2, and JP1-32/33 (IO34/IO35) are I2C1 at
+	 * 1.8V; those pins are not part of the GPIO header state either.
+	 * IO9/IO10 remain GPIO.
+	 * Do not drive 3.3V levels into the 1.8V pins.
+	 */
+	header_gpio0_pins: header-gpio0-pins {
+		header-gpio0-cfg {
+			pinmux = <K230_PINMUX(2, 0)>,	/* JP1-7  BANK0_GPIO2 */
+				 <K230_PINMUX(3, 0)>,	/* JP1-8  BANK0_GPIO3 */
+				 <K230_PINMUX(4, 0)>,	/* JP1-9  BANK0_GPIO4 */
+				 <K230_PINMUX(5, 0)>,	/* JP1-10 BANK0_GPIO5 */
+				 <K230_PINMUX(6, 0)>,	/* JP1-11 BANK0_GPIO6 */
+				 <K230_PINMUX(9, 0)>,	/* JP1-14 BANK0_GPIO9 */
+				 <K230_PINMUX(10, 0)>,	/* JP1-15 BANK0_GPIO10 */
+				 <K230_PINMUX(14, 0)>,	/* JP1-18 BANK1_GPIO14 */
+				 <K230_PINMUX(15, 0)>,	/* JP1-19 BANK1_GPIO15 */
+				 <K230_PINMUX(16, 0)>,	/* JP1-20 BANK1_GPIO16 */
+				 <K230_PINMUX(17, 0)>,	/* JP1-21 BANK1_GPIO17 */
+				 <K230_PINMUX(18, 0)>,	/* JP1-22 BANK1_GPIO18 */
+				 <K230_PINMUX(19, 0)>,	/* JP1-23 BANK1_GPIO19 */
+				 <K230_PINMUX(26, 0)>,	/* JP1-24 BANK2_GPIO26 */
+				 <K230_PINMUX(27, 0)>,	/* JP1-25 BANK2_GPIO27 */
+				 <K230_PINMUX(28, 0)>,	/* JP1-26 BANK2_GPIO28 */
+				 <K230_PINMUX(29, 0)>,	/* JP1-27 BANK2_GPIO29 */
+				 <K230_PINMUX(30, 0)>,	/* JP1-28 BANK2_GPIO30 */
+				 <K230_PINMUX(31, 0)>;	/* JP1-29 BANK2_GPIO31 */
+			slew-rate = <0>;
+			drive-strength = <7>;
+			power-source = <K230_MSC_1V8>;
+			input-enable;
+			output-enable;
+			bias-disable;
+		};
+	};
+
+	header_gpio1_1v8_pins: header-gpio1-1v8-pins {
+		header-gpio1-1v8-cfg {
+			pinmux = <K230_PINMUX(32, 0)>,	/* JP1-30 BANK2_GPIO32 */
+				 <K230_PINMUX(33, 0)>;	/* JP1-31 BANK2_GPIO33 */
+			slew-rate = <0>;
+			drive-strength = <7>;
+			power-source = <K230_MSC_1V8>;
+			input-enable;
+			output-enable;
+			bias-disable;
+		};
+	};
+
 };
+
 
 &sysclk {
 	clocks = <&osc24m>, <&timerx_pulse_in>;
@@ -405,10 +466,14 @@
 
 &gpio0 {
 	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&header_gpio0_pins>;
 };
 
 &gpio1 {
 	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&header_gpio1_1v8_pins>;
 };
 
 &wdt0 {
@@ -449,4 +514,29 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c4_header_pins>;
 	clock-frequency = <100000>;
+};
+
+/* JP1 40-pin header line names (offsets 0..31 on each port). */
+&gpio0_porta {
+	gpio-line-names =
+		/* 0-1   */ "", "",
+		/* 2-12  */ "BANK0_GPIO2", "BANK0_GPIO3", "BANK0_GPIO4",
+			    "BANK0_GPIO5", "BANK0_GPIO6", "BANK0_GPIO7",
+			    "BANK0_GPIO8", "BANK0_GPIO9", "BANK0_GPIO10",
+			    "BANK0_GPIO11", "BANK0_GPIO12",
+		/* 13    */ "",
+		/* 14-19 */ "BANK1_GPIO14", "BANK1_GPIO15", "BANK1_GPIO16",
+			    "BANK1_GPIO17", "BANK1_GPIO18", "BANK1_GPIO19",
+		/* 20-25 */ "", "", "", "", "", "",
+		/* 26-31 */ "BANK2_GPIO26", "BANK2_GPIO27", "BANK2_GPIO28",
+			    "BANK2_GPIO29", "BANK2_GPIO30", "BANK2_GPIO31";
+};
+
+&gpio1_porta {
+	gpio-line-names =
+		/* 0-3   */ "BANK2_GPIO32", "BANK2_GPIO33",
+			    "BANK2_GPIO34", "BANK2_GPIO35",
+		/* 4-27  */ "", "", "", "", "", "", "", "", "", "", "", "",
+			    "", "", "", "", "", "", "", "", "", "", "", "",
+		/* 28-29 */ "BANK4_GPIO60", "BANK4_GPIO61";
 };
