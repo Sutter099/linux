@@ -446,6 +446,34 @@ static int k230_get_groups(struct pinctrl_dev *pctldev, unsigned int selector,
 	return 0;
 }
 
+static bool k230_function_is_gpio(struct pinctrl_dev *pctldev,
+				  unsigned int selector)
+{
+	struct k230_pinctrl *info = pinctrl_dev_get_drvdata(pctldev);
+	const struct k230_pmx_func *func;
+	unsigned int i, j;
+
+	if (selector >= info->nfunctions)
+		return false;
+
+	func = &info->functions[selector];
+	if (!func->ngroups)
+		return false;
+
+	for (i = 0; i < func->ngroups; i++) {
+		const struct k230_pin_group *grp;
+
+		grp = &info->groups[func->group_idx[i]];
+		for (j = 0; j < grp->num_pins; j++) {
+			/* Function 0 is GPIO on every K230 pin. */
+			if (grp->data[j].func != 0)
+				return false;
+		}
+	}
+
+	return true;
+}
+
 static int k230_set_mux(struct pinctrl_dev *pctldev, unsigned int selector,
 			unsigned int group)
 {
@@ -475,6 +503,7 @@ static const struct pinmux_ops k230_pmxops = {
 	.get_function_name	= k230_get_fname,
 	.get_function_groups	= k230_get_groups,
 	.set_mux		= k230_set_mux,
+	.function_is_gpio	= k230_function_is_gpio,
 	.strict			= true,
 };
 
