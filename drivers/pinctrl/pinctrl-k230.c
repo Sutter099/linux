@@ -3,6 +3,7 @@
  * Copyright (C) 2024 Canaan Bright Sight Co. Ltd
  * Copyright (C) 2024 Ze Huang <18771902331@163.com>
  */
+#include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/of.h>
@@ -71,6 +72,7 @@ struct k230_pinctrl {
 	struct regmap		*regmap_base;
 	void __iomem		*base;
 	struct k230_pin_group	*groups;
+	struct clk		*clk;
 	unsigned int		ngroups;
 	struct k230_pmx_func	*functions;
 	unsigned int		nfunctions;
@@ -667,6 +669,11 @@ static int k230_pinctrl_probe(struct platform_device *pdev)
 	info->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(info->base))
 		return PTR_ERR(info->base);
+
+	info->clk = devm_clk_get_enabled(dev, "apb");
+	if (IS_ERR(info->clk))
+		return dev_err_probe(dev, PTR_ERR(info->clk),
+				     "no apb clock\n");
 
 	info->regmap_base = devm_regmap_init_mmio(dev, info->base,
 						  &k230_regmap_config);
