@@ -20,6 +20,7 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
+		bootargs = "console=ttyS0,115200 earlycon=sbi loglevel=8 ignore_loglevel";
 	};
 
 	ddr: memory@0 {
