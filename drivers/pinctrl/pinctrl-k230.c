@@ -336,11 +336,13 @@ static int k230_pinconf_set_param(struct pinctrl_dev *pctldev, unsigned int pin,
 		if (!arg)
 			return -EINVAL;
 		val |= K230_PC_PD;
+		val &= ~K230_PC_PU;
 		break;
 	case PIN_CONFIG_BIAS_PULL_UP:
 		if (!arg)
 			return -EINVAL;
 		val |= K230_PC_PU;
+		val &= ~K230_PC_PD;
 		break;
 	case PIN_CONFIG_OUTPUT_ENABLE:
 		if (!arg)
