@@ -466,6 +466,11 @@ static const struct pinmux_ops k230_pmxops = {
 	.strict			= true,
 };
 
+static void k230_free_configs(void *data)
+{
+	kfree(data);
+}
+
 static int k230_pinctrl_parse_groups(struct device_node *np,
 				     struct k230_pin_group *grp,
 				     struct k230_pinctrl *info,
@@ -503,6 +508,13 @@ static int k230_pinctrl_parse_groups(struct device_node *np,
 						      &grp->data[i].nconfigs);
 		if (ret)
 			return ret;
+
+		if (grp->data[i].configs) {
+			ret = devm_add_action_or_reset(dev, k230_free_configs,
+						      grp->data[i].configs);
+			if (ret)
+				return ret;
+		}
 	}
 
 	return 0;
