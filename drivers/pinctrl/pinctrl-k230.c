@@ -207,8 +207,13 @@ static int k230_dt_node_to_map(struct pinctrl_dev *pctldev,
 	map_num = 0;
 	for (i = 0; i < func->ngroups; ++i) {
 		grp_id = func->group_idx[i];
-		/* npins of config map plus a mux map */
-		map_num += info->groups[grp_id].num_pins + 1;
+		grp = &info->groups[grp_id];
+		/* One mux map per group, plus nonempty pin configurations. */
+		map_num++;
+		for (j = 0; j < grp->num_pins; ++j) {
+			if (grp->data[j].nconfigs)
+				map_num++;
+		}
 	}
 
 	new_map = kzalloc_objs(*new_map, map_num);
@@ -227,6 +232,9 @@ static int k230_dt_node_to_map(struct pinctrl_dev *pctldev,
 		idx++;
 
 		for (j = 0; j < grp->num_pins; ++j) {
+			if (!grp->data[j].nconfigs)
+				continue;
+
 			new_map[idx].type = PIN_MAP_TYPE_CONFIGS_PIN;
 			new_map[idx].data.configs.group_or_pin =
 				pin_get_name(pctldev, grp->pins[j]);
