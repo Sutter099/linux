@@ -190,9 +190,13 @@ static void test_user_faults(struct kvm_vcpu **vcpus)
 		struct kvm_one_reg reg = {
 			.id = ids[i], .addr = (u64)(buffer + page_size),
 		};
-		u64 saved = vcpu_get_reg(vcpu, ids[i]);
+		u64 saved = REG_SENTINEL ^ (i + 1);
+		u64 replacement = ~saved;
 		int ret;
 
+		/* Nonzero state distinguishes failed writes from zero-filled input. */
+		vcpu_set_reg(vcpu, ids[i], saved);
+		TEST_ASSERT_EQ(vcpu_get_reg(vcpu, ids[i]), saved);
 		/* Fully inaccessible and partially accessible input/output. */
 		for (unsigned int offset = 0; offset <= sizeof(u64) / 2;
 		     offset += sizeof(u64) / 2) {
@@ -200,13 +204,16 @@ static void test_user_faults(struct kvm_vcpu **vcpus)
 			ret = __vcpu_ioctl(vcpu, KVM_GET_ONE_REG, &reg);
 			TEST_ASSERT(ret == -1 && errno == EFAULT,
 				    "GET_ONE_REG must reject inaccessible output");
+			/* GET may partially copy out; do not feed that back to SET. */
+			if (offset)
+				memset(buffer + page_size - offset, 0x3c, offset);
 			ret = __vcpu_ioctl(vcpu, KVM_SET_ONE_REG, &reg);
 			TEST_ASSERT(ret == -1 && errno == EFAULT,
 				    "SET_ONE_REG must reject inaccessible input");
 			TEST_ASSERT_EQ(vcpu_get_reg(vcpu, ids[i]), saved);
 		}
 		/* A read-only page is valid input, but not valid output. */
-		memcpy(buffer, &saved, sizeof(saved));
+		memcpy(buffer, &replacement, sizeof(replacement));
 		TEST_ASSERT(!mprotect(buffer, page_size, PROT_READ),
 			    "mprotect failed");
 		reg.addr = (u64)buffer;
@@ -214,7 +221,7 @@ static void test_user_faults(struct kvm_vcpu **vcpus)
 		TEST_ASSERT(ret == -1 && errno == EFAULT,
 			    "GET_ONE_REG must reject read-only output");
 		vcpu_ioctl(vcpu, KVM_SET_ONE_REG, &reg);
-		TEST_ASSERT_EQ(vcpu_get_reg(vcpu, ids[i]), saved);
+		TEST_ASSERT_EQ(vcpu_get_reg(vcpu, ids[i]), replacement);
 		TEST_ASSERT(!mprotect(buffer, page_size, PROT_READ | PROT_WRITE),
 			    "mprotect failed");
 	}
