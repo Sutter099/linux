@@ -510,12 +510,13 @@ static int k230_pinctrl_parse_groups(struct device_node *np,
 
 static int k230_pinctrl_parse_functions(struct device_node *np,
 					struct k230_pinctrl *info,
-					unsigned int index)
+					unsigned int index,
+					unsigned int *group_idx)
 {
 	struct device *dev = info->dev;
 	struct k230_pmx_func *func;
 	struct k230_pin_group *grp;
-	static unsigned int idx, i;
+	unsigned int i;
 	int ret;
 
 	func = &info->functions[index];
@@ -536,12 +537,12 @@ static int k230_pinctrl_parse_functions(struct device_node *np,
 
 	for_each_child_of_node_scoped(np, child) {
 		func->groups[i] = child->name;
-		func->group_idx[i] = idx;
-		grp = &info->groups[idx];
-		idx++;
+		func->group_idx[i] = *group_idx;
+		grp = &info->groups[*group_idx];
 		ret = k230_pinctrl_parse_groups(child, grp, info, i++);
 		if (ret)
 			return ret;
+		(*group_idx)++;
 	}
 
 	return 0;
@@ -561,7 +562,7 @@ static int k230_pinctrl_parse_dt(struct platform_device *pdev,
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	unsigned int i;
+	unsigned int i, group_idx = 0;
 	int ret;
 
 	k230_pinctrl_child_count(info, np);
@@ -576,7 +577,8 @@ static int k230_pinctrl_parse_dt(struct platform_device *pdev,
 	i = 0;
 
 	for_each_child_of_node_scoped(np, child) {
-		ret = k230_pinctrl_parse_functions(child, info, i++);
+		ret = k230_pinctrl_parse_functions(child, info, i++,
+						  &group_idx);
 		if (ret) {
 			dev_err(dev, "failed to parse function\n");
 			return ret;
