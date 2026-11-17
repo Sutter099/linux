@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* RISC-V timer one-reg migration constraints and per-vCPU compare state. */
+/* RISC-V timer one-reg migration constraints and per-vCPU timer state. */
 #include "kvm_util.h"
 #include "processor.h"
 
@@ -23,26 +23,57 @@ static void test_frequency(struct kvm_vcpu **vcpus)
 static void test_compare_isolation(struct kvm_vcpu **vcpus)
 {
 	const u64 compare = RISCV_TIMER_REG(compare);
-	const u64 state = RISCV_TIMER_REG(state);
 	const u64 values[] = { 0, 0x123456789abcdef0ULL, ~0ULL };
 	unsigned int i;
 
-	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], state), KVM_RISCV_TIMER_STATE_OFF);
-	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], state), KVM_RISCV_TIMER_STATE_OFF);
 	for (i = 0; i < ARRAY_SIZE(values); i++) {
 		vcpu_set_reg(vcpus[0], compare, values[i]);
 		vcpu_set_reg(vcpus[1], compare, ~values[i]);
 		TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], compare), values[i]);
 		TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], compare), ~values[i]);
-		/* Restoring compare alone must not arm a stopped timer. */
-		TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], state), KVM_RISCV_TIMER_STATE_OFF);
-		TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], state), KVM_RISCV_TIMER_STATE_OFF);
 	}
-	/* Clearing one stopped timer's compare must leave its sibling intact. */
 	vcpu_set_reg(vcpus[1], compare, values[1]);
 	vcpu_set_reg(vcpus[0], compare, 0);
 	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], compare), values[1]);
 	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], compare), 0);
+}
+
+static void test_state_roundtrip(struct kvm_vcpu **vcpus)
+{
+	const u64 compare = RISCV_TIMER_REG(compare);
+	const u64 state = RISCV_TIMER_REG(state);
+	u64 frequency = vcpu_get_reg(vcpus[0], RISCV_TIMER_REG(frequency));
+	u64 now, delta, deadline;
+	unsigned int v;
+
+	/* Keep the software timers pending throughout this ioctl-only test. */
+	TEST_ASSERT(frequency && frequency <= ~0ULL / 60,
+		    "Invalid timer frequency: %lu", frequency);
+	delta = frequency * 60;
+	now = vcpu_get_reg(vcpus[0], RISCV_TIMER_REG(time));
+	TEST_ASSERT(now < ~0ULL - delta, "Timer deadline would overflow");
+	deadline = now + delta;
+	for (v = 0; v < 2; v++) {
+		TEST_ASSERT_EQ(vcpu_get_reg(vcpus[v], state), KVM_RISCV_TIMER_STATE_OFF);
+		vcpu_set_reg(vcpus[v], compare, deadline + v);
+		TEST_ASSERT_EQ(vcpu_get_reg(vcpus[v], state), KVM_RISCV_TIMER_STATE_OFF);
+	}
+
+	/* Establish ON as a positive control before relying on OFF readback. */
+	vcpu_set_reg(vcpus[0], state, KVM_RISCV_TIMER_STATE_ON);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], state), KVM_RISCV_TIMER_STATE_ON);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], state), KVM_RISCV_TIMER_STATE_OFF);
+	vcpu_set_reg(vcpus[1], state, KVM_RISCV_TIMER_STATE_ON);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], state), KVM_RISCV_TIMER_STATE_ON);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], state), KVM_RISCV_TIMER_STATE_ON);
+
+	vcpu_set_reg(vcpus[0], state, KVM_RISCV_TIMER_STATE_OFF);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], state), KVM_RISCV_TIMER_STATE_OFF);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], state), KVM_RISCV_TIMER_STATE_ON);
+	vcpu_set_reg(vcpus[1], state, KVM_RISCV_TIMER_STATE_OFF);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], state), KVM_RISCV_TIMER_STATE_OFF);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[0], compare), deadline);
+	TEST_ASSERT_EQ(vcpu_get_reg(vcpus[1], compare), deadline + 1);
 }
 
 int main(void)
@@ -50,9 +81,11 @@ int main(void)
 	const struct {
 		const char *name;
 		void (*run)(struct kvm_vcpu **vcpus);
+		bool software_timer_only;
 	} tests[] = {
-		{ "timer_frequency_write_constraint", test_frequency },
-		{ "timer_compare_vcpu_isolation", test_compare_isolation },
+		{ "timer_frequency_write_constraint", test_frequency, false },
+		{ "timer_compare_vcpu_isolation", test_compare_isolation, false },
+		{ "timer_state_vcpu_isolation", test_state_roundtrip, true },
 	};
 	unsigned int i;
 
@@ -64,9 +97,16 @@ int main(void)
 		struct kvm_vcpu *vcpus[] = { __vm_vcpu_add(vm, 0),
 					    __vm_vcpu_add(vm, 1) };
 
-		tests[i].run(vcpus);
+		/* Sstc state reflects the blocking hrtimer, not vstimecmp enable. */
+		if (tests[i].software_timer_only &&
+		    __vcpu_has_isa_ext(vcpus[0], KVM_RISCV_ISA_EXT_SSTC)) {
+			ksft_test_result_skip("%s: requires software timer backend\n",
+					      tests[i].name);
+		} else {
+			tests[i].run(vcpus);
+			ksft_test_result_pass("%s\n", tests[i].name);
+		}
 		kvm_vm_free(vm);
-		ksft_test_result_pass("%s\n", tests[i].name);
 	}
 	ksft_finished();
 }
